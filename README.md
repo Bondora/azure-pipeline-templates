@@ -69,6 +69,34 @@ resources:
 
 # Template usage
 
+## Templates for Building and publishing Nuget packages
+.NET Nuget package test, analyze, build and publish to Azure Artifactory. 
+
+### Template "pipelines/pipeline-dotnet-nuget.yml"
+This template is used to build and publish _.NET / .NET Core / .NET Standad_ Nuget projects.
+
+```yaml
+trigger:
+- master
+
+# Set the default agent pool for all stages
+pool:
+  vmImage: 'ubuntu-latest'
+
+resources:
+  repositories:
+  - repository: templates
+    type: git
+    name: azure-devops-project-name/azure-pipeline-templates
+    ref: refs/tags/v1
+
+extends:
+  template: pipelines/pipeline-dotnet-nuget.yml@templates
+  parameters:
+    projectName: 'Bondora.Sample.Nuget' # Mandatory, used for project name (projectName.csproj)
+
+```
+
 ## Use Stage templates inside your pipeline for custom pipeline
 
 ```yaml
