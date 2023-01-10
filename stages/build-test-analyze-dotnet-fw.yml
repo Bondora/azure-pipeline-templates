@@ -1,0 +1,123 @@
+parameters:
+# Optional parameters
+- name: dependsOn
+  type: object
+  default: ['SetVersion']
+- name: condition # Condition to execute the stage
+  type: string
+  default: >
+    and(
+      succeeded(), 
+      or(
+        eq(variables['build.sourceBranch'], 'refs/heads/main'),
+        eq(variables['build.sourceBranch'], 'refs/heads/master'),
+        eq(variables['Build.Reason'], 'PullRequest'), 
+        eq(variables['Build.Reason'], 'Manual')
+      )
+    )
+- name: poolName
+  type: string
+  default: ''
+- name: vmImage
+  type: string
+  default: 'windows-2019'
+- name: timeoutInMinutes # how long to run the job before automatically cancelling
+  type: number
+  default: 10
+- name: cancelTimeoutInMinutes # how much time to give 'run always even if cancelled tasks' before killing them
+  type: number
+  default: 0
+- name: sonarProjectKey # If empty then Sonarsan will not be performed
+  type: string
+  default: ''
+- name: solutionFilePath # No need to set if only one solution or project file in root directory
+  type: string
+  default: '**/*.sln'
+- name: sonarPollingTimeoutSec
+  type: number
+  default: 300
+- name: runTests
+  type: boolean
+  default: true
+- name: stageNameSuffix
+  type: string
+  default: ''
+
+stages:
+- stage: Test${{ parameters.stageNameSuffix }}
+  displayName: Build, Test and Analyze ${{ parameters.stageNameSuffix }}
+  dependsOn: ${{ parameters.dependsOn }}
+  condition: ${{ parameters.condition }}
+  ${{ if ne(parameters.poolName, '') }}:
+    pool: ${{ parameters.poolName }}
+  ${{ elseif ne(parameters.vmImage, '') }}:
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+  variables:
+  - ${{ if ne(parameters.sonarProjectKey, '') }}:
+    - group: 'SonarCloud'
+  - group: 'azure-artifacts'
+  jobs:
+  - job: Build_Test_Analyze
+    displayName: Build, Test and Analyze
+    timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+    cancelTimeoutInMinutes: ${{ parameters.cancelTimeoutInMinutes }}
+    steps:
+    - ${{ if ne(parameters.sonarProjectKey, '') }}:
+      - task: SonarCloudPrepare@1
+        displayName: Initialize Sonarqube
+        inputs:
+          SonarCloud: 'SonarCloud'
+          organization: $(sonar-organization-key-variable)
+          scannerMode: 'MSBuild'
+          projectKey: '${{ parameters.sonarProjectKey }}'
+          ${{ if eq(parameters.runTests, false) }}:
+            extraProperties: |
+              sonar.inclusions="src/**/*.cs"
+          ${{ if eq(parameters.runTests, true) }}:
+            extraProperties: |
+              sonar.inclusions="src/**/*.cs"
+              sonar.coverageReportPaths="$(Build.SourcesDirectory)/coverage/SonarQube.xml"
+              sonar.cs.xunit.reportsPaths="$(Build.SourcesDirectory)/tests/*/test-result.xml"
+
+    - task: NuGetCommand@2
+      displayName: Restore
+      inputs:
+        command: 'restore'
+        restoreSolution: '${{ parameters.solutionFilePath }}'
+        feedsToUse: 'select'
+        vstsFeed: '$(artifact-feed-name)'
+    
+    - task: VSBuild@1
+      displayName: Build solution
+      inputs:
+        solution: '${{ parameters.solutionFilePath }}'
+        msbuildArgs: '/nodereuse:false /p:DebugSymbols=true'
+        maximumCpuCount: true
+        restoreNugetPackages: false
+
+    - ${{ if eq(parameters.runTests, true) }}:
+      - task: DotNetCoreCLI@2
+        displayName: Run tests
+        inputs:
+          command: 'test'
+          arguments: '${{ parameters.solutionFilePath }} --no-restore --no-build --logger:"trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage" --results-directory ./coverage'
+          publishTestResults: false
+
+      - bash: |
+          dotnet tool install dotnet-reportgenerator-globaltool --tool-path .
+          ./reportgenerator "-reports:$(Build.SourcesDirectory)/coverage/*/coverage.cobertura.xml" "-targetdir:coverage" "-reporttypes:SonarQube"
+        displayName: Generate Coverage Report
+
+      - task: PublishCodeCoverageResults@1
+        displayName: Publish Code Coverage Results
+        inputs:
+          codeCoverageTool: 'cobertura'
+          summaryFileLocation: $(Build.SourcesDirectory)/coverage/*/coverage.cobertura.xml
+          failIfCoverageEmpty: false
+
+    - ${{ if ne(parameters.sonarProjectKey, '') }}:
+      - task: SonarCloudAnalyze@1
+      - task: SonarCloudPublish@1
+        inputs:
+          pollingTimeoutSec: '${{ parameters.sonarPollingTimeoutSec }}'
