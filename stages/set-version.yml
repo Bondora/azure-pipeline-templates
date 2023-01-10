@@ -1,0 +1,60 @@
+parameters:
+- name: dependsOn
+  type: object
+  default: []
+- name: condition
+  type: string
+  default: >
+    or(
+      eq(variables['build.sourceBranch'], 'refs/heads/main'),
+      eq(variables['build.sourceBranch'], 'refs/heads/master'), 
+      eq(variables['Build.Reason'], 'PullRequest'), 
+      eq(variables['Build.Reason'], 'Manual')
+    )
+- name: poolName
+  type: string
+  default: ''
+- name: timeoutInMinutes
+  type: number
+  default: 2
+- name: cancelTimeoutInMinutes
+  type: number
+  default: 0
+- name: configFilePath
+  type: string
+  default: './GitVersion.yml'
+- name: versionVariableName
+  type: string
+  default: 'SemVer'
+
+stages:
+- stage: SetVersion
+  displayName: Set build version
+  dependsOn: ${{ parameters.dependsOn }}
+  condition: ${{ parameters.condition }}
+  ${{ if ne(parameters.poolName, '') }}:
+    pool: ${{ parameters.poolName }}
+  jobs:
+  - job: SetVersion
+    displayName: Set build version from ${{ parameters.versionVariableName }}
+    timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+    cancelTimeoutInMinutes: ${{ parameters.cancelTimeoutInMinutes }}
+    steps:
+    - checkout: self
+      fetchDepth: 0
+      fetchTags: true
+    - task: gitversion/setup@0
+      displayName: Install GitVersion
+      inputs:
+        versionSpec: '5.x'
+    - task: gitversion/execute@0
+      displayName: Calculate Version
+      inputs:
+        useConfigFile: true
+        configFilePath: ${{ parameters.configFilePath }}
+    - task: Bash@3
+      displayName: 'Update build number'
+      inputs:
+        targetType: inline
+        script: |
+          echo "##vso[build.updatebuildnumber]$(${{ parameters.versionVariableName }})"
