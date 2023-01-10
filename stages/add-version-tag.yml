@@ -1,0 +1,55 @@
+parameters:
+- name: dependsOn
+  type: object
+  default: ['Publish']
+- name: condition
+  type: string
+  default: succeeded()
+- name: timeoutInMinutes # how long to run the job before automatically cancelling
+  type: number
+  default: 2
+- name: cancelTimeoutInMinutes # how much time to give 'run always even if cancelled tasks' before killing them
+  type: number
+  default: 0
+- name: poolName
+  type: string
+  default: ''
+- name: versionVariableName
+  type: string
+  default: 'Build.BuildNumber'
+
+stages:
+- stage: AddVersionTag
+  displayName: Add version tag
+  dependsOn: ${{ parameters.dependsOn }}
+  condition: ${{ parameters.condition }}
+  ${{ if ne(parameters.poolName, '') }}:
+    pool: ${{ parameters.poolName }}
+  variables:
+    gitUserName: ${{ coalesce(variables['Build.RequestedFor'], 'BuildService') }}
+    ${{ if endsWith(variables['Build.RequestedForEmail'], '@bondora.com') }}:
+      gitUserEmail: ${{ variables['Build.RequestedForEmail'] }}
+    ${{ else }}:
+      gitUserEmail: 'buildservice@bondora.com'
+  jobs:
+  - job: AddVersionTag
+    displayName: Add Build tag from ${{ parameters.versionVariableName }}
+    timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+    cancelTimeoutInMinutes: ${{ parameters.cancelTimeoutInMinutes }}
+    steps:
+    - checkout: self
+      persistCredentials: true #Important - Persist credentials to run further git commands in tasks
+    - task: Bash@3
+      inputs:
+        targetType: inline
+        script: echo "##vso[build.addbuildtag]v$(${{ parameters.versionVariableName }})"
+      displayName: 'Add build tag'
+    - task: Bash@3
+      displayName: "Create git tag"
+      inputs:
+        targetType: inline
+        script: |
+          git config --global user.name "$(gitUserName)"
+          git config --global user.email "$(gitUserEmail)"
+          git tag -a v$(${{ parameters.versionVariableName }}) -m "Version $(${{ parameters.versionVariableName }}) publish from build with Id $(Build.BuildId)"
+          git push -f --tags
