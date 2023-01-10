@@ -1,0 +1,95 @@
+parameters:
+- name: serviceName
+  type: string
+# Optional parameters
+- name: dependsOn
+  type: string
+  default: ''
+- name: condition
+  type: string
+  default: always()
+- name: poolName
+  type: string
+  default: ''
+- name: timeoutInMinutes # how long to run the job before automatically cancelling
+  type: number
+  default: 10
+- name: cancelTimeoutInMinutes # how much time to give 'run always even if cancelled tasks' before killing them
+  type: number
+  default: 0
+- name: deployState
+  type: string
+  default: started
+  values:
+  - started
+  - finished
+- name: deployStageName # Specify if the deploy job's Stage is different than Notify_Slack job's stage
+  type: string
+  default: ''
+- name: deployJobIdentifier # Like 'Deploy_Stage.Deploy_Job' ('StageName.JobName', add '.Deploy' suffix if used in deploys). If stage name prefix is not set then 'deployStageName' or slack notify job's stage name is used.
+  type: string
+  default: ''
+- name: slackChannelId
+  type: string
+  displayName: "Slack channel ID where deploy notifications will be sent"
+  default: '' # Leave empty for default channel
+- name: additionalSlackChannelId
+  type: string
+  displayName: "Additional, like group deploys, Slack channel ID where deploy notifications will be sent"
+  default: ''
+- name: infoMessage
+  type: string
+  displayName: "Additional informational message to show in Slack post"
+  default: ''
+- name: azureDevOpsProjectName
+  type: string
+  default: 'services-and-infrastructure'
+- name: showDebugInfo
+  type: boolean
+  default: false
+
+jobs:
+- job: NotifySlack_${{ parameters.deployState }}
+  ${{ if or(eq(parameters.deployState, 'finished'), ne(parameters.dependsOn, '')) }}:
+    dependsOn:
+    - ${{ if eq(parameters.deployState, 'finished') }}:
+      - NotifySlack_started
+    - ${{ if ne(parameters.dependsOn, '') }}:
+      - ${{ parameters.dependsOn }}
+  condition: ${{ parameters.condition }}
+  ${{ if ne(parameters.poolName, '') }}:
+    pool: ${{ parameters.poolName }}
+  timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+  cancelTimeoutInMinutes: ${{ parameters.cancelTimeoutInMinutes }}
+  variables:
+  - name: slackChannelId
+    value: $[coalesce('${{ parameters.slackChannelId }}', variables.slackDefaultDeployChannelId)]
+  - name: deployStartedSlackMessageId
+    ${{ if eq(parameters.deployState, 'finished') }}:
+      value: $[dependencies.NotifySlack_started.outputs['SendSlackNotification_DeployState_started.DeploySlackMessageId']]
+    ${{ else }}:
+      value: ''
+  - group: 'slack-variable-group'
+  steps:
+  - checkout: git://${{ variables['System.TeamProject'] }}/azure-pipeline-scripts@refs/tags/v1
+  - task: PowerShell@2
+    name: SendSlackNotification_DeployState_${{ parameters.deployState }}
+    displayName: 'Send Slack notification (${{ parameters.deployState }})'
+    condition: ${{ parameters.condition }}
+    timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+    inputs:
+      filePath: scripts/notify-deploy-to-slack.ps1
+      arguments: >
+        -DeployState "${{ parameters.deployState }}"
+        -ServiceName "${{ parameters.serviceName }}"
+        -SlackApiUri "$(slackApiUri)"
+        -SlackAuthToken "$(slackAuthToken)"
+        -ChannelId "$(slackChannelId)"
+        -SystemAccessToken "$(System.AccessToken)"
+        -AdditionalChannelId "${{ parameters.additionalSlackChannelId }}"
+        -InfoMessage "${{ parameters.infoMessage }}"
+        -DeployStageName "${{ parameters.deployStageName }}"
+        -DeployJobIdentifier "${{ parameters.deployJobIdentifier }}"
+        -DeployStartedSlackMessageId "$(deployStartedSlackMessageId)"
+        -ShowDebugInfo $${{ parameters.showDebugInfo }}
+      failOnStderr: true
