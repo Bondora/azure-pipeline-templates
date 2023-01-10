@@ -145,7 +145,7 @@ stages:
     serviceName: ${{ parameters.serviceName }}
 ```
 
-## Template "jobs/notify-deploy-finished-to-slack.yml"
+## Template "jobs/notify-deploy-started-to-slack.yml"
 
 - Parameter `serviceName` is required, so that service name can be displayed inside Slack message.
 - Parameter `infoMessage` is optional informational message in Slack message.
