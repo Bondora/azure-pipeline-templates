@@ -1,0 +1,35 @@
+parameters:
+- name: serviceName
+  type: string
+- name: dependsOn # Job name (not display name)
+  type: string
+- name: deployJobIdentifier # Like 'Deploy_Stage.Deploy_Job' ('StageName.JobName', add '.Deploy' suffix if used in deploys)
+  type: string
+# Optional parameters
+- name: slackChannelId
+  type: string
+  displayName: "Slack channel ID where deploy notifications will be sent, If not set, default is used"
+  default: ''
+- name: additionalSlackChannelId
+  type: string
+  displayName: "Additional, like group deploys, Slack channel ID where deploy notifications will be sent"
+  default: ''
+- name: infoMessage
+  type: string
+  displayName: "Additional informational message to show"
+  default: ''
+- name: showDebugInfo
+  type: boolean
+  default: false
+
+jobs:
+- template: notify-deploy-to-slack.yml
+  parameters:
+    serviceName: ${{ parameters.serviceName }}
+    dependsOn: ${{ parameters.dependsOn }}
+    deployJobIdentifier: ${{ parameters.deployJobIdentifier }}
+    deployState: 'finished'
+    slackChannelId: ${{ parameters.slackChannelId }}
+    additionalSlackChannelId: ${{ parameters.additionalSlackChannelId }}
+    infoMessage: ${{ parameters.infoMessage }}
+    showDebugInfo: ${{ parameters.showDebugInfo }}
