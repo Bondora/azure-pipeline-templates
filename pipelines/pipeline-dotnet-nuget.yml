@@ -1,0 +1,48 @@
+parameters:
+- name: 'projectName'
+  type: string
+# Optional parameters  
+- name: 'solutionFilePath'
+  type: string
+  default: ''
+- name: sonarProjectKey
+  type: string
+  default: ''
+- name: dotNetVersion
+  type: string
+  default: '6.0'
+- name: runInContainer
+  type: boolean
+  default: false
+- name: runTests
+  type: boolean
+  default: true
+- name: skipPublish
+  type: boolean
+  default: false
+
+variables:
+- name: sonarProjectKey
+  value: ${{ coalesce(parameters.sonarProjectKey, lower(replace(parameters.projectName, '.', '-'))) }} # "My.Service.X" -> "my-service-x"
+
+stages:
+
+- template: ../stages/set-version.yml
+
+- template: ../stages/build-test-analyze-dotnet.yml
+  parameters:
+    solutionFilePath: ${{ parameters.solutionFilePath }}
+    sonarProjectKey: ${{ variables.sonarProjectKey }}
+    dotNetVersion: ${{ parameters.dotNetVersion }}
+    runInContainer: ${{ parameters.runInContainer }}
+    runTests: ${{ parameters.runTests }}
+
+- template: ../stages/build-and-publish-nuget-package.yml
+  parameters:
+    projectName: ${{ parameters.projectName }}
+    skipPublish: ${{ parameters.skipPublish }}
+
+- ${{ if eq(parameters.skipPublish, false) }}:
+  - template: ../stages/add-version-tag.yml
+    parameters:
+      dependsOn: Build_Publish
