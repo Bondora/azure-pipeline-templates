@@ -1,0 +1,87 @@
+parameters:
+- name: projectName
+  type: string
+# Optional parameters
+- name: dependsOn
+  type: object
+  default: ['Test']
+- name: condition
+  type: string
+  default: >
+    and(
+      succeeded(), 
+      or(
+        eq(variables['build.sourceBranch'], 'refs/heads/main'),
+        eq(variables['build.sourceBranch'], 'refs/heads/master'), 
+        eq(variables['Build.Reason'], 'Manual')
+      )
+    )
+- name: poolName
+  type: string
+  default: ''
+- name: vmImage
+  type: string
+  default: ''
+- name: timeoutInMinutes # how long to run the job before automatically cancelling
+  type: number
+  default: 10
+- name: cancelTimeoutInMinutes # how much time to give 'run always even if cancelled tasks' before killing them
+  type: number
+  default: 0
+- name: versionEnvVar
+  type: string
+  default: 'Build.BuildNumber'
+- name: storeNugetAsArtifact
+  type: boolean
+  default: true
+- name: skipPublish
+  type: boolean
+  default: false
+- name: stageNameSuffix
+  type: string
+  default: ''
+
+stages:
+- stage: Build_Publish${{ parameters.stageNameSuffix }}
+  displayName: Build and Publish ${{ parameters.stageNameSuffix }}
+  dependsOn: ${{ parameters.dependsOn }}
+  condition: ${{ parameters.condition }}
+  ${{ if ne(parameters.poolName, '') }}:
+    pool: ${{ parameters.poolName }}
+  ${{ elseif ne(parameters.vmImage, '') }}:
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+  variables:
+  - group: 'azure-artifacts'
+  jobs:
+  - job: Build_Publish_Nuget
+    displayName: Build and Publish Nuget package
+    timeoutInMinutes: ${{ parameters.timeoutInMinutes }}
+    cancelTimeoutInMinutes: ${{ parameters.cancelTimeoutInMinutes }}
+    steps:
+    - task: DotNetCoreCLI@2
+      displayName: Pack Nuget
+      inputs:
+        command: 'pack'
+        packagesToPack: '**/${{ parameters.projectName }}.csproj'
+        packDestination: '$(Build.ArtifactStagingDirectory)'
+        versioningScheme: byEnvVar
+        versionEnvVar: '${{ parameters.versionEnvVar }}'
+        configuration: 'Release'
+        verbosityPack: 'Minimal'
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish Nuget as artifact
+      condition: and(succeeded(), eq('${{ parameters.storeNugetAsArtifact }}', 'true'))
+      inputs:
+        artifactName: NugetPackage
+        path: $(Build.ArtifactStagingDirectory)
+
+    - task: DotNetCoreCLI@2
+      displayName: Push Nuget
+      condition: and(succeeded(), eq('${{ parameters.skipPublish }}', 'false'))
+      inputs:
+        command: 'push'
+        packagesToPush: '$(Build.ArtifactStagingDirectory)/**/*.nupkg;!$(Build.ArtifactStagingDirectory)/**/*.symbols.nupkg'
+        nuGetFeedType: 'internal'
+        publishVstsFeed: '$(artifact-feed-name)'
